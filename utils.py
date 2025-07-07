@@ -1,3 +1,6 @@
+import requests
+import pandas as pd
+
 def get_option_chain_data():
     url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
     headers = {
@@ -10,18 +13,13 @@ def get_option_chain_data():
 
     session = requests.Session()
     session.headers.update(headers)
-
-    # First request to homepage to get cookies
     session.get("https://www.nseindia.com", timeout=5)
-
-    # Now make the actual API call
     response = session.get(url, timeout=5)
 
     if response.status_code != 200:
-        raise ValueError(f"NSE API returned error status: {response.status_code}")
+        raise ValueError(f"NSE API error: {response.status_code}")
 
     data = response.json()
-    
     spot_price = data['records']['underlyingValue']
     all_data = data['records']['data']
 
@@ -46,3 +44,51 @@ def get_option_chain_data():
     df_filtered = df_filtered.sort_values("Strike").reset_index(drop=True)
 
     return df_filtered, spot_price
+
+def analyze_oi(df, spot_price):
+    if df.empty:
+        return "⚠️ No data available to analyze", [], [], None
+
+    supports = df[df['Strike'] <= spot_price].sort_values(by='PE_OI', ascending=False).head(2)['Strike'].tolist()
+    if len(supports) < 2:
+        below_spot = df[df['Strike'] <= spot_price]['Strike'].sort_values(ascending=False).tolist()
+        for s in below_spot:
+            if s not in supports and len(supports) < 2:
+                supports.append(s)
+
+    resistances = df[df['Strike'] >= spot_price].sort_values(by='CE_OI', ascending=False).head(2)['Strike'].tolist()
+    if len(resistances) < 2:
+        above_spot = df[df['Strike'] >= spot_price]['Strike'].sort_values(ascending=True).tolist()
+        for r in above_spot:
+            if r not in resistances and len(resistances) < 2:
+                resistances.append(r)
+
+    supports = sorted(supports)
+    resistances = sorted(resistances)
+
+    suggestion = ""
+    target = None
+
+    if spot_price < supports[0]:
+        suggestion = f"🟢 Bounce expected from strong support at {supports[0]}"
+        target = resistances[0]
+    elif spot_price > resistances[-1]:
+        suggestion = f"🔴 Pullback expected from strong resistance at {resistances[-1]}"
+        target = supports[-1]
+    elif supports[0] <= spot_price <= resistances[-1]:
+        nearest_strike = df.iloc[(df['Strike'] - spot_price).abs().argsort()[:1]]['Strike'].values[0]
+        pe_near = df[df['Strike'] == nearest_strike]['PE_OI'].values[0]
+        ce_near = df[df['Strike'] == nearest_strike]['CE_OI'].values[0]
+
+        if pe_near > ce_near:
+            suggestion = "🟢 Bullish bias near spot"
+            target = resistances[-1]
+        elif ce_near > pe_near:
+            suggestion = "🔴 Bearish bias near spot"
+            target = supports[0]
+        else:
+            suggestion = "⚪ Range-bound market near spot"
+    else:
+        suggestion = "⚠️ Spot outside monitored range"
+
+    return suggestion, supports, resistances, target
