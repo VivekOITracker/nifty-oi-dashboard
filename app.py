@@ -1,5 +1,6 @@
 import streamlit as st
 from utils import get_option_chain_data, analyze_oi
+import datetime
 
 st.set_page_config(page_title="NIFTY OI Tracker", layout="wide")
 
@@ -20,7 +21,11 @@ if st.button("🔄 Refresh Data"):
     st.session_state.last_oi_data = df
     st.session_state.last_suggestion = suggestion
 
-    # Display results
+    # Show last updated timestamp
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.caption(f"🕒 Last updated: {now}")
+
+    # Display live spot price
     st.metric("📌 Spot Price", f"{spot_price:.2f}")
     st.success(f"📊 Suggested Market Move: {suggestion}")
 
@@ -30,7 +35,7 @@ if st.button("🔄 Refresh Data"):
     **Target price for trade:** {target if target else 'N/A'}
     """)
 
-    # Define and show OI table in range
+    # Show OI table between supports and resistances
     min_strike = min(supports + resistances)
     max_strike = max(supports + resistances)
     df_range = df[(df['Strike'] >= min_strike) & (df['Strike'] <= max_strike)].copy()
