@@ -2,39 +2,48 @@ import requests
 import pandas as pd
 import time
 
-def get_option_chain_data():
+def get_option_chain_data(retries=3, delay=2):
     url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
-
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/114.0.0.0 Safari/537.36"
+        ),
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept": "application/json, text/plain, */*",
         "Referer": "https://www.nseindia.com/",
-        "Connection": "keep-alive"
+        "Connection": "keep-alive",
+        "Origin": "https://www.nseindia.com"
     }
 
     session = requests.Session()
     session.headers.update(headers)
 
-    # Request homepage first to get cookies
-    homepage_resp = session.get("https://www.nseindia.com", timeout=5)
-    if homepage_resp.status_code != 200:
-        raise Exception("Failed to get NSE homepage")
+    # Attempt retries
+    for attempt in range(retries):
+        try:
+            # Initial request to homepage to get cookies
+            response_home = session.get("https://www.nseindia.com", timeout=5)
+            if response_home.status_code != 200:
+                raise Exception(f"Homepage request failed with status {response_home.status_code}")
 
-    time.sleep(1)  # Small delay to allow cookies to settle
+            # Now request option chain API with cookies set
+            response = session.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                break  # success, exit retry loop
+            else:
+                raise Exception(f"NSE API returned status {response.status_code}")
 
-    # Request option chain data
-    response = session.get(url, timeout=10)
-    if response.status_code != 200:
-        raise Exception(f"NSE API error: {response.status_code}")
-
-    try:
-        data = response.json()
-    except Exception as e:
-        print("Failed to decode JSON from NSE response. Response text:")
-        print(response.text)
-        raise e
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(delay)
+                continue  # retry
+            else:
+                # Raise the last exception after max retries
+                raise e
 
     spot_price = data['records']['underlyingValue']
     all_data = data['records']['data']
@@ -56,57 +65,7 @@ def get_option_chain_data():
     df['Total_OI'] = df['CE_OI'] + df['PE_OI']
     df['PCR'] = df['PE_OI'] / df['CE_OI'].replace(0, 1)
 
-    # Filter strikes ±300 points around spot price
     df_filtered = df[(df['Strike'] >= spot_price - 300) & (df['Strike'] <= spot_price + 300)]
     df_filtered = df_filtered.sort_values("Strike").reset_index(drop=True)
 
     return df_filtered, spot_price
-
-def analyze_oi(df, spot_price):
-    # Find top 2 supports (highest PE OI) below or near spot
-    supports = df[df['Strike'] <= spot_price].sort_values(by='PE_OI', ascending=False).head(2)['Strike'].tolist()
-    if len(supports) < 2:
-        below_spot = df[df['Strike'] <= spot_price]['Strike'].sort_values(ascending=False).tolist()
-        for s in below_spot:
-            if s not in supports and len(supports) < 2:
-                supports.append(s)
-    
-    # Find top 2 resistances (highest CE OI) above or near spot
-    resistances = df[df['Strike'] >= spot_price].sort_values(by='CE_OI', ascending=False).head(2)['Strike'].tolist()
-    if len(resistances) < 2:
-        above_spot = df[df['Strike'] >= spot_price]['Strike'].sort_values(ascending=True).tolist()
-        for r in above_spot:
-            if r not in resistances and len(resistances) < 2:
-                resistances.append(r)
-    
-    supports = sorted(supports)
-    resistances = sorted(resistances)
-
-    suggestion = ""
-    target = None
-
-    if spot_price < supports[0]:
-        suggestion = f"🟢 Bounce expected from strong support at {supports[0]}"
-        target = resistances[0]
-    elif spot_price > resistances[-1]:
-        suggestion = f"🔴 Pullback expected from strong resistance at {resistances[-1]}"
-        target = supports[-1]
-    elif supports[0] <= spot_price <= resistances[-1]:
-        nearest_strike = df.iloc[(df['Strike'] - spot_price).abs().argsort()[:1]]['Strike'].values[0]
-        pe_near = df[df['Strike'] == nearest_strike]['PE_OI'].values[0]
-        ce_near = df[df['Strike'] == nearest_strike]['CE_OI'].values[0]
-
-        if pe_near > ce_near:
-            suggestion = "🟢 Bullish bias near spot"
-            target = resistances[-1]
-        elif ce_near > pe_near:
-            suggestion = "🔴 Bearish bias near spot"
-            target = supports[0]
-        else:
-            suggestion = "⚪ Range-bound market near spot"
-            target = None
-    else:
-        suggestion = "⚠️ Spot outside monitored range"
-        target = None
-
-    return suggestion, supports, resistances, target
