@@ -3,21 +3,28 @@ import pandas as pd
 
 def get_option_chain_data():
     url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "*/*",
         "Accept-Encoding": "gzip, deflate, br",
-        "Accept": "application/json",
-        "Referer": "https://www.nseindia.com/"
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.nseindia.com/",
+        "Connection": "keep-alive"
     }
 
     session = requests.Session()
     session.headers.update(headers)
-    session.get("https://www.nseindia.com", timeout=5)
-    response = session.get(url, timeout=5)
 
+    # Hit homepage to get cookies first
+    homepage = session.get("https://www.nseindia.com", timeout=5)
+    if homepage.status_code != 200:
+        raise Exception("Failed to connect to NSE homepage.")
+
+    # Then hit the Option Chain API
+    response = session.get(url, timeout=10)
     if response.status_code != 200:
-        raise ValueError(f"NSE API error: {response.status_code}")
+        raise Exception(f"NSE API error: {response.status_code}")
 
     data = response.json()
     spot_price = data['records']['underlyingValue']
@@ -45,17 +52,18 @@ def get_option_chain_data():
 
     return df_filtered, spot_price
 
-def analyze_oi(df, spot_price):
-    if df.empty:
-        return "⚠️ No data available to analyze", [], [], None
 
+def analyze_oi(df, spot_price):
+    # Find top 2 supports (highest PE OI) below or near spot
     supports = df[df['Strike'] <= spot_price].sort_values(by='PE_OI', ascending=False).head(2)['Strike'].tolist()
+    # If less than 2 supports found, fill with lowest strikes below spot
     if len(supports) < 2:
         below_spot = df[df['Strike'] <= spot_price]['Strike'].sort_values(ascending=False).tolist()
         for s in below_spot:
             if s not in supports and len(supports) < 2:
                 supports.append(s)
 
+    # Find top 2 resistances (highest CE OI) above or near spot
     resistances = df[df['Strike'] >= spot_price].sort_values(by='CE_OI', ascending=False).head(2)['Strike'].tolist()
     if len(resistances) < 2:
         above_spot = df[df['Strike'] >= spot_price]['Strike'].sort_values(ascending=True).tolist()
@@ -63,19 +71,22 @@ def analyze_oi(df, spot_price):
             if r not in resistances and len(resistances) < 2:
                 resistances.append(r)
 
+    # Sort them ascending
     supports = sorted(supports)
     resistances = sorted(resistances)
 
+    # Build suggestion logic based on spot price vs supports/resistances
     suggestion = ""
     target = None
 
     if spot_price < supports[0]:
         suggestion = f"🟢 Bounce expected from strong support at {supports[0]}"
-        target = resistances[0]
+        target = resistances[0]  # Target next resistance
     elif spot_price > resistances[-1]:
         suggestion = f"🔴 Pullback expected from strong resistance at {resistances[-1]}"
-        target = supports[-1]
+        target = supports[-1]  # Target next support
     elif supports[0] <= spot_price <= resistances[-1]:
+        # Check bias near spot by comparing CE_OI and PE_OI at nearest strike
         nearest_strike = df.iloc[(df['Strike'] - spot_price).abs().argsort()[:1]]['Strike'].values[0]
         pe_near = df[df['Strike'] == nearest_strike]['PE_OI'].values[0]
         ce_near = df[df['Strike'] == nearest_strike]['CE_OI'].values[0]
@@ -88,7 +99,9 @@ def analyze_oi(df, spot_price):
             target = supports[0]
         else:
             suggestion = "⚪ Range-bound market near spot"
+            target = None
     else:
         suggestion = "⚠️ Spot outside monitored range"
+        target = None
 
     return suggestion, supports, resistances, target
