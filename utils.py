@@ -10,28 +10,18 @@ def get_option_chain_data():
     session.headers.update(headers)
     response = session.get(url, timeout=5)
     data = response.json()
+
+    spot_price = data['records']['underlyingValue']
+    all_data = data['records']['data']
+
     ce_data, pe_data = [], []
 
-    for item in data['records']['data']:
+    for item in all_data:
+        strike = item.get("strikePrice")
         if 'CE' in item and 'PE' in item:
-            ce = item['CE']
-            pe = item['PE']
-            ce_data.append([ce['strikePrice'], ce['openInterest']])
-            pe_data.append([pe['strikePrice'], pe['openInterest']])
+            ce_oi = item['CE'].get("openInterest", 0)
+            pe_oi = item['PE'].get("openInterest", 0)
+            ce_data.append([strike, ce_oi])
+            pe_data.append([strike, pe_oi])
 
-    df_ce = pd.DataFrame(ce_data, columns=['Strike', 'CE_OI'])
-    df_pe = pd.DataFrame(pe_data, columns=['Strike', 'PE_OI'])
-    df = df_ce.merge(df_pe, on='Strike')
-    df['PCR'] = df['PE_OI'] / df['CE_OI']
-    return df
-
-def analyze_oi(df):
-    max_ce_strike = df.loc[df['CE_OI'].idxmax(), 'Strike']
-    max_pe_strike = df.loc[df['PE_OI'].idxmax(), 'Strike']
-
-    if max_pe_strike > max_ce_strike:
-        return f"Market Bias: Bullish (Support at {max_pe_strike}, Resistance at {max_ce_strike})"
-    elif max_ce_strike > max_pe_strike:
-        return f"Market Bias: Bearish (Resistance at {max_ce_strike}, Support at {max_pe_strike})"
-    else:
-        return "Range Bound Market"
+    df_ce = pd.DataFrame(c_
