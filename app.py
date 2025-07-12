@@ -4,15 +4,25 @@ import datetime
 
 st.set_page_config(page_title="NIFTY OI Tracker", layout="wide")
 
+# Session state initialization
 if 'last_oi_data' not in st.session_state:
     st.session_state.last_oi_data = None
-
 if 'last_suggestion' not in st.session_state:
     st.session_state.last_suggestion = ""
+if 'last_spot_price' not in st.session_state:
+    st.session_state.last_spot_price = None
+if 'last_supports' not in st.session_state:
+    st.session_state.last_supports = []
+if 'last_resistances' not in st.session_state:
+    st.session_state.last_resistances = []
+if 'last_target' not in st.session_state:
+    st.session_state.last_target = None
+if 'last_updated' not in st.session_state:
+    st.session_state.last_updated = None
 
 st.title("📊 NIFTY 50 Open Interest Dashboard")
 
-# Manual Refresh Button
+# Manual refresh button
 if st.button("🔄 Refresh Data"):
     try:
         df, spot_price = get_option_chain_data()
@@ -27,22 +37,21 @@ if st.button("🔄 Refresh Data"):
         st.session_state.last_target = target
         st.session_state.last_updated = datetime.datetime.now()
 
-        # Display Metrics
+        # Show results
         st.metric("📌 Spot Price", f"{spot_price:.2f}")
         st.success(f"📊 Suggested Market Move: {suggestion}")
         st.caption(f"🕒 Last updated: {st.session_state.last_updated.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        # Show important levels
         st.markdown(f"""
         **Support Strikes:** {supports}  
         **Resistance Strikes:** {resistances}  
         **Target Price (approx):** {target if target else 'N/A'}
         """)
 
-        # Filter and display only relevant strike prices
+        # Filter relevant OI data
         min_strike = min(supports + resistances)
         max_strike = max(supports + resistances)
-        df_range = df[(df['Strike'] >= min_strike) & (df['Strike'] <= max_strike)].copy()
+        df_range = df[(df['Strike'] >= min_strike) & (df['Strike'] <= max_strike)]
 
         st.subheader("🔍 OI Data between Major Support and Resistance Strikes")
         st.dataframe(
@@ -55,6 +64,7 @@ if st.button("🔄 Refresh Data"):
 
 else:
     st.info("⬆ Click the **Refresh Data** button above to load the latest OI data.")
+
     if st.session_state.last_oi_data is not None:
         st.metric("📌 Spot Price", f"{st.session_state.last_spot_price:.2f}")
         st.success(f"📊 Suggested Market Move: {st.session_state.last_suggestion}")
@@ -69,7 +79,7 @@ else:
         df = st.session_state.last_oi_data
         min_strike = min(st.session_state.last_supports + st.session_state.last_resistances)
         max_strike = max(st.session_state.last_supports + st.session_state.last_resistances)
-        df_range = df[(df['Strike'] >= min_strike) & (df['Strike'] <= max_strike)].copy()
+        df_range = df[(df['Strike'] >= min_strike) & (df['Strike'] <= max_strike)]
 
         st.subheader("🔍 OI Data between Major Support and Resistance Strikes")
         st.dataframe(
